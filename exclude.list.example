@@ -1,0 +1,8 @@
+# LXC Container Exclude List
+# Add one CTID per line to skip during updates
+# Lines starting with # are ignored
+#
+# Examples:
+# 100
+# 105
+# 110

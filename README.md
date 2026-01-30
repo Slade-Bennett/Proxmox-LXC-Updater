@@ -6,11 +6,12 @@ A bash script for automating package updates across all LXC containers on a Prox
 
 - Automatically updates all LXC containers with `apt-get`
 - Handles stopped containers (starts them, updates, then stops)
-- Prevents concurrent runs with lock file protection
+- Prevents concurrent runs with `flock`-based locking
 - Pre-flight internet connectivity check
-- Excludable container list
-- Color-coded output with progress indicators
-- Daily log files for audit trail
+- External exclude list configuration file
+- Automatic log rotation (30-day retention)
+- Results summary with success/failure/skipped counts
+- Color-coded output
 
 ## Requirements
 
@@ -20,21 +21,41 @@ A bash script for automating package updates across all LXC containers on a Prox
 
 ## Installation
 
+### Quick Install
+
+Clone the repo to your Proxmox host and run the installer:
+
+```bash
+git clone <repo-url> && cd UpdateLXC
+chmod +x install.sh
+sudo ./install.sh
+```
+
+The installer will:
+- Copy the script to `/usr/bin/lxc-update`
+- Create `/etc/lxc-update/` config directory
+- Create an empty exclude list file
+- Create the log directory
+
+### Manual Install
+
 1. Copy the script to your Proxmox host:
    ```bash
-   scp update.sh root@proxmox:/usr/local/bin/lxc-update.sh
+   scp update.sh root@proxmox:/usr/bin/lxc-update
+   chmod +x /usr/bin/lxc-update
    ```
 
-2. Make it executable:
+2. Create the config directory:
    ```bash
-   chmod +x /usr/local/bin/lxc-update.sh
+   mkdir -p /etc/lxc-update
+   cp exclude.list.example /etc/lxc-update/exclude.list
    ```
 
 ## Usage
 
 Run manually:
 ```bash
-./lxc-update.sh
+lxc-update
 ```
 
 ### Scheduled Updates (Cron)
@@ -46,51 +67,70 @@ crontab -e
 
 ```cron
 # Run every Sunday at 3:00 AM
-0 3 * * 0 /usr/local/bin/lxc-update.sh >> /var/log/lxc-update/cron.log 2>&1
+0 3 * * 0 /usr/bin/lxc-update >> /var/log/lxc-update/cron.log 2>&1
 ```
 
 ## Configuration
 
 ### Excluding Containers
 
-Edit the `EXCLUDE_LIST` variable at the top of the script to skip specific containers:
+Edit `/etc/lxc-update/exclude.list` and add one CTID per line:
 
-```bash
-EXCLUDE_LIST="100 105 110"  # Space-separated CTIDs to skip
+```
+# Lines starting with # are ignored
+100
+105
+110
 ```
 
-### Log Directory
+Or use the command line:
+```bash
+echo "100" >> /etc/lxc-update/exclude.list
+```
 
-Logs are stored in `/var/log/lxc-update/` with daily rotation by filename (`YYYY-MM-DD.log`).
+### Configuration Variables
+
+Edit these variables at the top of the script (`/usr/bin/lxc-update`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOGDIR` | `/var/log/lxc-update` | Log file directory |
+| `LOCKFILE` | `/tmp/lxc-update.lock` | Lock file path |
+| `EXCLUDE_FILE` | `/etc/lxc-update/exclude.list` | Exclude list file |
+| `LOG_RETENTION_DAYS` | `30` | Days to keep log files |
 
 ## How It Works
 
-1. Checks for existing lock file to prevent concurrent runs
-2. Verifies internet connectivity via ping to `8.8.8.8`
-3. Retrieves list of all containers using `pct list`
-4. For each container:
+1. Acquires exclusive lock using `flock` to prevent concurrent runs
+2. Cleans up log files older than 30 days
+3. Loads exclude list from `/etc/lxc-update/exclude.list`
+4. Verifies internet connectivity via ping to `8.8.8.8`
+5. Retrieves list of all containers using `pct list`
+6. For each container:
    - Skips if in exclude list
    - Starts container if stopped (remembers original state)
+   - Waits for container to be ready (up to 10 seconds)
    - Runs `apt-get update`
    - Runs `apt-get upgrade -y`
    - Runs `apt-get autoremove -y`
    - Restores original stopped state if applicable
-5. Logs all output with timestamps
+7. Displays summary with success/failure/skipped counts
 
 ## Output Example
 
 ```
-📦 Starting LXC updates: Wed Jan 28 10:00:00 UTC 2026
+Starting LXC updates: Wed Jan 28 10:00:00 UTC 2026
 
-🔧 Updating container 100
-🔄 Progress: 0%
-🔄 Progress: 25%
-🔄 Progress: 50%
-🔄 Progress: 75%
-✅ Progress: 100%
-✅ Finished container 100
+Updating container 100...
+Finished container 100
 
-✅ All containers updated: Wed Jan 28 10:05:00 UTC 2026
+Updating container 101...
+Finished container 101
+
+Skipping container 105 (excluded)
+
+Update complete: Wed Jan 28 10:05:00 UTC 2026
+Results: 2 succeeded, 0 failed, 1 skipped
 ```
 
 ## Limitations
@@ -99,12 +139,23 @@ Logs are stored in `/var/log/lxc-update/` with daily rotation by filename (`YYYY
 - Requires containers to have network access
 - No parallel execution (updates containers sequentially)
 
-## Files
+## Repository Files
+
+| File | Description |
+|------|-------------|
+| `update.sh` | Main update script |
+| `install.sh` | Installer script |
+| `exclude.list.example` | Example exclude list template |
+
+## Installed Files
 
 | Path | Description |
 |------|-------------|
+| `/usr/bin/lxc-update` | Installed script |
+| `/etc/lxc-update/exclude.list` | Container exclusion list |
 | `/var/log/lxc-update/` | Log directory |
-| `/tmp/lxc-update.lock` | Lock file (auto-cleaned) |
+| `/var/log/lxc-update/YYYY-MM-DD.log` | Daily log files |
+| `/tmp/lxc-update.lock` | Lock file (auto-released) |
 
 ## License
 
