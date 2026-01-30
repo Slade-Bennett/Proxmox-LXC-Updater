@@ -146,6 +146,7 @@ Results: 2 succeeded, 0 failed, 1 skipped
 | `update.sh` | Main update script |
 | `install.sh` | Installer script |
 | `exclude.list.example` | Example exclude list template |
+| `LICENSE` | MIT License |
 
 ## Installed Files
 
@@ -157,6 +158,8 @@ Results: 2 succeeded, 0 failed, 1 skipped
 | `/var/log/lxc-update/YYYY-MM-DD.log` | Daily log files |
 | `/tmp/lxc-update.lock` | Lock file (auto-released) |
 
-## License
+## 📜 License
 
-MIT
+This project is licensed under the **[MIT License](LICENSE)** - feel free to use, modify, and distribute.
+
+---
