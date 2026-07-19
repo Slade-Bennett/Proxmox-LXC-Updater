@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake ping for testing - always succeeds instantly, no real network needed.
+# update.sh only checks the exit code, never the output.
+exit 0

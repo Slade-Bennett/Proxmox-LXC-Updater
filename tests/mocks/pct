@@ -1,0 +1,86 @@
+#!/bin/bash
+# Fake `pct` for testing update.sh without a real Proxmox host or containers.
+# Behavior is controlled entirely via environment variables, set by the Bats
+# tests in tests/update.bats:
+#
+#   MOCK_PCT_LIST             "100:running 101:stopped 105:running"
+#   MOCK_PCT_FAIL_START       CTIDs that should never become ready (e.g. "102")
+#   MOCK_PCT_FAIL_UPDATE      CTIDs where `apt-get update` should fail
+#   MOCK_PCT_FAIL_UPGRADE     CTIDs where `apt-get upgrade` should fail
+#   MOCK_PCT_FAIL_AUTOREMOVE  CTIDs where `apt-get autoremove` should fail
+#   MOCK_PCT_CALL_LOG         file every invocation is appended to, for assertions
+
+CALL_LOG="${MOCK_PCT_CALL_LOG:-/dev/null}"
+echo "pct $*" >> "$CALL_LOG"
+
+contains() {
+    # contains <ctid> <space-separated list>
+    local needle=" $1 "
+    local haystack=" ${2:-} "
+    [[ "$haystack" == *"$needle"* ]]
+}
+
+cmd="$1"; shift || true
+
+case "$cmd" in
+    list)
+        echo "VMID       Status     Lock         Name"
+        for entry in $MOCK_PCT_LIST; do
+            ctid="${entry%%:*}"
+            status="${entry##*:}"
+            printf "%-10s %-10s %-12s %s\n" "$ctid" "$status" "" "ct-$ctid"
+        done
+        ;;
+    status)
+        ctid="$1"
+        found=0
+        for entry in $MOCK_PCT_LIST; do
+            e_ctid="${entry%%:*}"
+            e_status="${entry##*:}"
+            if [[ "$e_ctid" == "$ctid" ]]; then
+                echo "status: $e_status"
+                found=1
+                break
+            fi
+        done
+        [[ "$found" -eq 1 ]] || { echo "status: unknown"; exit 1; }
+        ;;
+    start)
+        exit 0
+        ;;
+    stop)
+        exit 0
+        ;;
+    exec)
+        ctid="$1"; shift
+        [[ "${1:-}" == "--" ]] && shift
+
+        if [[ "${1:-}" == "true" ]]; then
+            contains "$ctid" "${MOCK_PCT_FAIL_START:-}" && exit 1
+            exit 0
+        fi
+
+        # Remaining args look like: env DEBIAN_FRONTEND=noninteractive apt-get <subcmd> ...
+        for arg in "$@"; do
+            case "$arg" in
+                update)
+                    contains "$ctid" "${MOCK_PCT_FAIL_UPDATE:-}" && exit 1
+                    exit 0
+                    ;;
+                upgrade)
+                    contains "$ctid" "${MOCK_PCT_FAIL_UPGRADE:-}" && exit 1
+                    exit 0
+                    ;;
+                autoremove)
+                    contains "$ctid" "${MOCK_PCT_FAIL_AUTOREMOVE:-}" && exit 1
+                    exit 0
+                    ;;
+            esac
+        done
+        exit 0
+        ;;
+    *)
+        echo "mock pct: unhandled subcommand: $cmd" >&2
+        exit 1
+        ;;
+esac
