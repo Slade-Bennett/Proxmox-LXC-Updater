@@ -4,10 +4,13 @@
 # tests in tests/update.bats:
 #
 #   MOCK_PCT_LIST             "100:running 101:stopped 105:running"
+#   MOCK_PCT_PKGMGR           "100:apt-get 105:dnf 110:yum" - which binary
+#                             `command -v` should report as present for each
+#                             CTID. Defaults to apt-get for any CTID not listed.
 #   MOCK_PCT_FAIL_START       CTIDs that should never become ready (e.g. "102")
-#   MOCK_PCT_FAIL_UPDATE      CTIDs where `apt-get update` should fail
-#   MOCK_PCT_FAIL_UPGRADE     CTIDs where `apt-get upgrade` should fail
-#   MOCK_PCT_FAIL_AUTOREMOVE  CTIDs where `apt-get autoremove` should fail
+#   MOCK_PCT_FAIL_UPDATE      CTIDs where apt `update` / yum `update` should fail
+#   MOCK_PCT_FAIL_UPGRADE     CTIDs where apt/dnf `upgrade` should fail
+#   MOCK_PCT_FAIL_AUTOREMOVE  CTIDs where `autoremove` should fail
 #   MOCK_PCT_CALL_LOG         file every invocation is appended to, for assertions
 
 CALL_LOG="${MOCK_PCT_CALL_LOG:-/dev/null}"
@@ -18,6 +21,18 @@ contains() {
     local needle=" $1 "
     local haystack=" ${2:-} "
     [[ "$haystack" == *"$needle"* ]]
+}
+
+pkgmgr_for_ctid() {
+    # Which package manager binary "exists" for a given CTID. Defaults to
+    # apt-get so existing tests that never set MOCK_PCT_PKGMGR keep working.
+    local ctid=$1
+    for entry in $MOCK_PCT_PKGMGR; do
+        e_ctid="${entry%%:*}"
+        e_mgr="${entry##*:}"
+        [[ "$e_ctid" == "$ctid" ]] && { echo "$e_mgr"; return; }
+    done
+    echo "apt-get"
 }
 
 cmd="$1"; shift || true
@@ -60,7 +75,17 @@ case "$cmd" in
             exit 0
         fi
 
+        # Package manager detection: `command -v dnf` / `command -v yum` /
+        # `command -v apt-get` - succeed only for the one mapped to this CTID.
+        if [[ "${1:-}" == "command" && "${2:-}" == "-v" ]]; then
+            queried="${3:-}"
+            actual="$(pkgmgr_for_ctid "$ctid")"
+            [[ "$queried" == "$actual" ]] && exit 0
+            exit 1
+        fi
+
         # Remaining args look like: env DEBIAN_FRONTEND=noninteractive apt-get <subcmd> ...
+        # or, for dnf/yum: dnf|yum <subcmd> ...
         for arg in "$@"; do
             case "$arg" in
                 update)
