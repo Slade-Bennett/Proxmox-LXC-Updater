@@ -57,7 +57,7 @@ teardown() {
 
     run "$SCRIPT"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Failed apt update on 102"* ]]
+    [[ "$output" == *"Failed package update on 102 (apt)"* ]]
     [[ "$output" == *"0 succeeded, 1 failed, 0 skipped"* ]]
     grep -q "^pct stop 102$" "$MOCK_PCT_CALL_LOG"
 }
@@ -78,7 +78,7 @@ teardown() {
 
     run "$SCRIPT"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"apt autoremove failed on 106"* ]]
+    [[ "$output" == *"Package autoremove failed on 106 (apt) - update/upgrade still succeeded"* ]]
     [[ "$output" == *"Finished container 106"* ]]
     [[ "$output" == *"1 succeeded, 0 failed, 0 skipped"* ]]
 }
@@ -111,4 +111,70 @@ teardown() {
     [[ "$output" == *"Finished container 100"* ]]
     [[ "$output" == *"Finished container 105"* ]]
     [[ "$output" != *"container 101"* ]]
+}
+
+@test "updates a dnf-based container successfully" {
+    export MOCK_PCT_LIST="200:running"
+    export MOCK_PCT_PKGMGR="200:dnf"
+
+    run "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Finished container 200 (dnf)"* ]]
+    [[ "$output" == *"1 succeeded, 0 failed, 0 skipped"* ]]
+}
+
+@test "updates a yum-based container successfully" {
+    export MOCK_PCT_LIST="201:running"
+    export MOCK_PCT_PKGMGR="201:yum"
+
+    run "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Finished container 201 (yum)"* ]]
+    [[ "$output" == *"1 succeeded, 0 failed, 0 skipped"* ]]
+}
+
+@test "failed dnf upgrade restores stopped state and is counted as failed" {
+    export MOCK_PCT_LIST="202:stopped"
+    export MOCK_PCT_PKGMGR="202:dnf"
+    export MOCK_PCT_FAIL_UPGRADE="202"
+
+    run "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Failed package upgrade on 202 (dnf)"* ]]
+    [[ "$output" == *"0 succeeded, 1 failed, 0 skipped"* ]]
+    grep -q "^pct stop 202$" "$MOCK_PCT_CALL_LOG"
+}
+
+@test "failed yum update restores stopped state and is counted as failed" {
+    export MOCK_PCT_LIST="203:stopped"
+    export MOCK_PCT_PKGMGR="203:yum"
+    export MOCK_PCT_FAIL_UPDATE="203"
+
+    run "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Failed package update on 203 (yum)"* ]]
+    [[ "$output" == *"0 succeeded, 1 failed, 0 skipped"* ]]
+    grep -q "^pct stop 203$" "$MOCK_PCT_CALL_LOG"
+}
+
+@test "failed dnf autoremove logs a warning but still counts as succeeded" {
+    export MOCK_PCT_LIST="204:running"
+    export MOCK_PCT_PKGMGR="204:dnf"
+    export MOCK_PCT_FAIL_AUTOREMOVE="204"
+
+    run "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Package autoremove failed on 204 (dnf) - update/upgrade still succeeded"* ]]
+    [[ "$output" == *"Finished container 204 (dnf)"* ]]
+    [[ "$output" == *"1 succeeded, 0 failed, 0 skipped"* ]]
+}
+
+@test "container with no supported package manager is counted as failed" {
+    export MOCK_PCT_LIST="205:running"
+    export MOCK_PCT_PKGMGR="205:zypper"
+
+    run "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Could not detect a supported package manager on 205"* ]]
+    [[ "$output" == *"0 succeeded, 1 failed, 0 skipped"* ]]
 }
