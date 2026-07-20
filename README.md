@@ -4,7 +4,7 @@ A bash script for automating package updates across all LXC containers on a Prox
 
 ## Features
 
-- Automatically updates all LXC containers with `apt-get`
+- Automatically updates all LXC containers, auto-detecting `apt`, `dnf`, or `yum` per container at runtime
 - Handles stopped containers (starts them, updates, then stops)
 - Prevents concurrent runs with `flock`-based locking
 - Pre-flight internet connectivity check
@@ -17,7 +17,7 @@ A bash script for automating package updates across all LXC containers on a Prox
 
 - Proxmox VE host
 - Root access
-- Debian/Ubuntu-based LXC containers (uses `apt-get`)
+- LXC containers with `apt`, `dnf`, or `yum` available (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, and older CentOS/RHEL7-era containers are all supported). The package manager is auto-detected per container — no configuration needed, and a mix of distributions across containers is fine.
 
 ## Installation
 
@@ -26,7 +26,7 @@ A bash script for automating package updates across all LXC containers on a Prox
 Clone the repo to your Proxmox host and run the installer:
 
 ```bash
-git clone <repo-url> && cd UpdateLXC
+git clone https://github.com/Slade-Bennett/Proxmox-LXC-Updater.git && cd Proxmox-LXC-Updater
 chmod +x install.sh
 sudo ./install.sh
 ```
@@ -56,6 +56,19 @@ The installer will:
 Run manually:
 ```bash
 lxc-update
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `-c, --container <CTID>` | Update only this container. Repeatable or comma-separated (`-c 100,105`). Bypasses the exclude list, since an explicit target is an explicit request. |
+| `-n, --dry-run` | Show what would happen without starting/stopping containers or updating packages. |
+| `-h, --help` | Show the help message. |
+
+```bash
+lxc-update --dry-run          # preview a full run
+lxc-update -c 105              # update just container 105, even if it's on the exclude list
 ```
 
 ### Scheduled Updates (Cron)
@@ -90,14 +103,15 @@ echo "100" >> /etc/lxc-update/exclude.list
 
 ### Configuration Variables
 
-Edit these variables at the top of the script (`/usr/bin/lxc-update`):
+Every path is overridable via environment variable, mainly useful for testing without touching real system paths:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOGDIR` | `/var/log/lxc-update` | Log file directory |
-| `LOCKFILE` | `/tmp/lxc-update.lock` | Lock file path |
-| `EXCLUDE_FILE` | `/etc/lxc-update/exclude.list` | Exclude list file |
-| `LOG_RETENTION_DAYS` | `30` | Days to keep log files |
+| Variable | Env Var Override | Default | Description |
+|----------|-------------------|---------|-------------|
+| `LOGDIR` | `LXC_UPDATE_LOGDIR` | `/var/log/lxc-update` | Log file directory |
+| `LOCKFILE` | `LXC_UPDATE_LOCKFILE` | `/tmp/lxc-update.lock` | Lock file path |
+| `EXCLUDE_FILE` | `LXC_UPDATE_EXCLUDE_FILE` | `/etc/lxc-update/exclude.list` | Exclude list file |
+| `LOG_RETENTION_DAYS` | `LXC_UPDATE_LOG_RETENTION_DAYS` | `30` | Days to keep log files |
+| `CONTAINER_TIMEOUT` | `LXC_UPDATE_CONTAINER_TIMEOUT` | `600` | Seconds allowed per package manager step before a container is treated as hung |
 
 ## How It Works
 
@@ -110,10 +124,13 @@ Edit these variables at the top of the script (`/usr/bin/lxc-update`):
    - Skips if in exclude list
    - Starts container if stopped (remembers original state)
    - Waits for container to be ready (up to 10 seconds)
-   - Runs `apt-get update`
-   - Runs `apt-get upgrade -y`
-   - Runs `apt-get autoremove -y`
-   - Restores original stopped state if applicable
+   - Detects the package manager present (checks for `dnf`, then `yum`, then `apt-get`, via `command -v` inside the container — not inferred from an OS name, so it stays correct even if a container's OS changes)
+   - Updates packages using whichever manager was detected, each step bounded by a timeout so one hung container can't block the rest of the run:
+     - **apt**: `apt-get update`, `upgrade -y`, `autoremove -y`, noninteractively (`DEBIAN_FRONTEND=noninteractive`, existing conffiles kept on conflict)
+     - **dnf**: `dnf upgrade -y` (refreshes metadata and upgrades in one step), `dnf autoremove -y`
+     - **yum**: `yum update -y`, `yum autoremove -y`
+   - If no supported package manager is found, the container is counted as failed
+   - Restores original stopped state if applicable, including when the container fails to start or has no supported package manager
 7. Displays summary with success/failure/skipped counts
 
 ## Output Example
@@ -135,9 +152,17 @@ Results: 2 succeeded, 0 failed, 1 skipped
 
 ## Limitations
 
-- Only supports Debian/Ubuntu containers (apt-based)
+- Supports containers using `apt`, `dnf`, or `yum`; containers using other package managers (e.g. `apk`, `zypper`, `pacman`) are skipped and counted as failed
 - Requires containers to have network access
 - No parallel execution (updates containers sequentially)
+
+## Continuous Integration (Jenkins)
+
+This repo includes a `Jenkinsfile` that lints the script and runs a test suite against a mocked `pct` command — no real Proxmox host or containers involved, so it's safe to run on any Jenkins worker with `shellcheck` and [Bats](https://github.com/bats-core/bats-core) installed.
+
+Pipeline stages: **Lint** (`bash -n` + `shellcheck` on both scripts) → **Test** (`bats tests/`, exercising exclude-list handling, stopped/running state restoration, apt/dnf/yum detection and failure paths, and unsupported-package-manager handling, all against `tests/mocks/pct`, a fake `pct` command scripted via environment variables).
+
+Real end-to-end testing against actual LXC containers would require a Jenkins agent with `pct` access on the Proxmox host itself, which is a much bigger privilege grant than this pipeline needs — the mocked test suite is the intended way to validate logic changes.
 
 ## Repository Files
 
