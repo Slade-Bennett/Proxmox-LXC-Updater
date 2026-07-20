@@ -116,9 +116,8 @@ LOGFILE="$LOGDIR/$(date +%F).log"
 find "$LOGDIR" -name "*.log" -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null
 
 # Load exclude list from file (one CTID per line, # for comments)
-# Membership is checked as a space-padded substring match, e.g.
-# " 100 105 " =~ " 100 " — safe here since CTIDs are always plain integers
-# with no regex metacharacters.
+# Membership is checked as a space-padded substring glob match, e.g.
+# " 100 105 " == *" 100 "* — treats CTID as a literal string, not a pattern.
 EXCLUDE_LIST=""
 if [[ -f "$EXCLUDE_FILE" ]]; then
     EXCLUDE_LIST=$(grep -v '^#' "$EXCLUDE_FILE" | grep -v '^$' | tr '\n' ' ')
@@ -163,7 +162,7 @@ SKIPPED=0
 
 for CTID in $CTIDS; do
     # Exclude list only applies when no explicit -c/--container targets were given
-    if [[ ${#TARGET_CONTAINERS[@]} -eq 0 ]] && [[ " $EXCLUDE_LIST " =~ " $CTID " ]]; then
+    if [[ ${#TARGET_CONTAINERS[@]} -eq 0 ]] && [[ " $EXCLUDE_LIST " == *" $CTID "* ]]; then
         log_warn "Skipping container $CTID (excluded)"
         ((SKIPPED++))
         continue
